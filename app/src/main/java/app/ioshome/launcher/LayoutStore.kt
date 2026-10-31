@@ -8,7 +8,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
-/** Persists [HomeModel] as versioned JSON using AtomicFile, so a crash mid-write cannot corrupt it. */
+/**
+ * Persists [HomeModel] as versioned JSON using AtomicFile, so a crash mid-write cannot corrupt it.
+ * Schema 1 (phase 1: home, dock, known) is migrated transparently to schema 2 on the next save.
+ */
 class LayoutStore(context: Context) {
 
     private val file = AtomicFile(File(context.filesDir, "layout_v1.json"))
@@ -36,7 +39,7 @@ class LayoutStore(context: Context) {
     }
 
     companion object {
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         fun toJson(model: HomeModel): String {
             val o = JSONObject()
@@ -44,16 +47,43 @@ class LayoutStore(context: Context) {
             o.put("home", JSONArray(model.home))
             o.put("dock", JSONArray(model.dock))
             o.put("known", JSONArray(model.known))
+            o.put("hidden", JSONArray(model.hidden))
+            o.put("recents", JSONArray(model.recents))
+            val folders = JSONObject()
+            for ((id, folder) in model.folders) {
+                val f = JSONObject()
+                f.put("name", folder.name)
+                f.put("apps", JSONArray(folder.apps))
+                folders.put(id, f)
+            }
+            o.put("folders", folders)
             return o.toString()
         }
 
         fun fromJson(text: String): HomeModel? {
             val o = JSONObject(text)
-            if (o.optInt("v", -1) != VERSION) return null
+            val version = o.optInt("v", -1)
+            if (version != 1 && version != 2) return null
             val m = HomeModel()
             m.home.addAll(readList(o, "home"))
             m.dock.addAll(readList(o, "dock"))
             m.known.addAll(readList(o, "known"))
+            if (version >= 2) {
+                m.hidden.addAll(readList(o, "hidden"))
+                m.recents.addAll(readList(o, "recents"))
+                val folders = o.optJSONObject("folders")
+                if (folders != null) {
+                    val ids = folders.keys()
+                    while (ids.hasNext()) {
+                        val id = ids.next()
+                        if (!id.startsWith(HomeModel.FOLDER_PREFIX)) continue
+                        val f = folders.optJSONObject(id) ?: continue
+                        val data = FolderData(f.optString("name", "Folder"))
+                        data.apps.addAll(readList(f, "apps"))
+                        m.folders[id] = data
+                    }
+                }
+            }
             return m
         }
 

@@ -11,6 +11,8 @@ import android.widget.TextView
 /** Settings are shown as a simple dialog; each tap cycles or toggles a value and applies it immediately. */
 class SettingsDialog(private val activity: LauncherActivity, private val app: LauncherApp) {
 
+    private var shown: AlertDialog? = null
+
     fun show() {
         val s = app.settings
         val column = LinearLayout(activity)
@@ -34,12 +36,16 @@ class SettingsDialog(private val activity: LauncherActivity, private val app: La
             s.showLabels = !s.showLabels
             activity.applyState()
         }
-        addRow(column, "Animations", { onOff(s.animations) }) {
-            s.animations = !s.animations
+        addRow(column, "Animations", { if (!s.systemMotionEnabled()) "Off (system)" else onOff(s.animationsPref) }) {
+            s.animationsPref = !s.animationsPref
             activity.applyState()
         }
         addRow(column, "Haptic feedback", { onOff(s.haptics) }) {
             s.haptics = !s.haptics
+        }
+        addRow(column, "Open Control Center", { "" }) {
+            shown?.dismiss()
+            activity.openControlCenter()
         }
         addRow(column, "Change wallpaper", { "" }) {
             activity.openWallpaperPicker()
@@ -47,10 +53,13 @@ class SettingsDialog(private val activity: LauncherActivity, private val app: La
         addRow(column, "Default home app", { if (activity.isDefaultHome()) "Yes" else "Set" }) {
             activity.requestDefaultHome()
         }
+        addRow(column, "Hidden apps", { app.model.hidden.size.toString() }) {
+            showHiddenApps()
+        }
         addRow(column, "Reset home screen layout", { "" }) {
             AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("Reset layout?")
-                .setMessage("Apps return to their default positions. Nothing is uninstalled.")
+                .setMessage("Apps and folders return to their default layout. Hidden apps stay hidden. Nothing is uninstalled.")
                 .setPositiveButton("Reset") { _, _ -> app.resetLayout() }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -61,7 +70,8 @@ class SettingsDialog(private val activity: LauncherActivity, private val app: La
                 .setMessage(
                     "Version " + versionName() + "\n\n" +
                         "Works fully offline. No ads, no analytics and no network permission. " +
-                        "The only extra permission is used to show Android's own uninstall prompt.\n\n" +
+                        "Extra permissions: one to show Android's own uninstall prompt, and \"Modify system settings\", " +
+                        "which is only used if you grant it and use the brightness or rotation-lock controls.\n\n" +
                         "An independent, iOS-inspired launcher. Not affiliated with Apple."
                 )
                 .setPositiveButton("OK", null)
@@ -70,7 +80,7 @@ class SettingsDialog(private val activity: LauncherActivity, private val app: La
 
         val scroll = ScrollView(activity)
         scroll.addView(column)
-        AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
+        shown = AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle("Home Screen Settings")
             .setView(scroll)
             .setPositiveButton("Done", null)
@@ -109,6 +119,26 @@ class SettingsDialog(private val activity: LauncherActivity, private val app: La
             row,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         )
+    }
+
+    private fun showHiddenApps() {
+        val entries = app.model.hidden.mapNotNull { app.appsByKey[it] }
+        val builder = AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
+        if (entries.isEmpty()) {
+            builder.setTitle("Hidden apps")
+                .setMessage("No hidden apps. Long-press an app and choose Hide App to hide it.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val labels = entries.map { it.label }.toTypedArray()
+        builder.setTitle("Tap an app to unhide it")
+            .setItems(labels) { _, which ->
+                app.edit { unhide(entries[which].key) }
+                activity.toast("Unhidden")
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun onOff(value: Boolean): String = if (value) "On" else "Off"

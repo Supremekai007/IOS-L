@@ -33,6 +33,9 @@ class LauncherApp : Application() {
     /** Set by the visible activity; called on the main thread whenever apps or layout change. */
     var onDataChanged: (() -> Unit)? = null
 
+    /** Item that was just dropped; its icon plays a short settle animation when next bound. */
+    var popKey: String? = null
+
     private lateinit var store: LayoutStore
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -95,6 +98,11 @@ class LauncherApp : Application() {
             save()
             onDataChanged?.invoke()
         }
+    }
+
+    /** Like [edit] but does not refresh the UI (used for launch history, which the UI reads next time). */
+    fun editQuiet(change: HomeModel.() -> Boolean) {
+        if (model.change()) save()
     }
 
     fun reconcileNow() {

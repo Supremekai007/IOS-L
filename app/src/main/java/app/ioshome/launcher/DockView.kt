@@ -26,8 +26,11 @@ class DockView(context: Context) : LinearLayout(context) {
         iconPx: Int,
         icons: IconCache,
         animatePress: Boolean,
+        editMode: Boolean,
+        popKey: String?,
         onClick: (AppEntry, View) -> Unit,
-        onLongClick: (AppEntry, View) -> Unit
+        onLongClick: (AppEntry, View) -> Unit,
+        onBadge: (AppEntry) -> Unit
     ) {
         removeAllViews()
         for (entry in entries) {
@@ -38,7 +41,16 @@ class DockView(context: Context) : LinearLayout(context) {
                 onLongClick(entry, v)
                 true
             }
+            v.onBadge = { onBadge(entry) }
+            v.setEditMode(editMode, animatePress)
+            if (animatePress && entry.key == popKey) v.playPop()
             addView(v, LinearLayout.LayoutParams(slotWidth, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    fun setEditMode(on: Boolean, animate: Boolean) {
+        for (i in 0 until childCount) {
+            (getChildAt(i) as? AppIconView)?.setEditMode(on, animate)
         }
     }
 }

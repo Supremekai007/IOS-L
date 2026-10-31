@@ -41,6 +41,7 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
     private val emptyView = TextView(context)
     private val rowAdapter = RowAdapter()
     private var allApps: List<AppEntry> = emptyList()
+    private var recentApps: List<AppEntry> = emptyList()
     private var loaded = false
     private var rows: List<Row> = emptyList()
     private val iconPx = context.dp(44)
@@ -150,8 +151,9 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
         addView(frame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
-    fun setApps(apps: List<AppEntry>, isLoaded: Boolean) {
+    fun setApps(apps: List<AppEntry>, recents: List<AppEntry>, isLoaded: Boolean) {
         allApps = apps
+        recentApps = recents
         loaded = isLoaded
         refilter()
     }
@@ -177,7 +179,13 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
     private fun refilter() {
         val query = search.text.toString().trim()
         if (query.isEmpty()) {
-            rows = withHeaders(allApps)
+            val out = ArrayList<Row>()
+            if (recentApps.isNotEmpty()) {
+                out.add(Row("Recent", null))
+                for (recent in recentApps) out.add(Row(null, recent))
+            }
+            out.addAll(withHeaders(allApps))
+            rows = out
         } else {
             val lower = query.lowercase()
             val results = allApps

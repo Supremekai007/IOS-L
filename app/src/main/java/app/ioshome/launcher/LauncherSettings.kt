@@ -1,9 +1,11 @@
 package app.ioshome.launcher
 
 import android.content.Context
+import android.provider.Settings
 
 class LauncherSettings(context: Context) {
 
+    private val appContext: Context = context.applicationContext
     private val prefs = context.getSharedPreferences("launcher_settings", Context.MODE_PRIVATE)
 
     var columns: Int
@@ -31,11 +33,24 @@ class LauncherSettings(context: Context) {
             prefs.edit().putBoolean(KEY_LABELS, value).apply()
         }
 
-    var animations: Boolean
+    /** The user's own switch in this launcher's settings. */
+    var animationsPref: Boolean
         get() = prefs.getBoolean(KEY_ANIMATIONS, true)
         set(value) {
             prefs.edit().putBoolean(KEY_ANIMATIONS, value).apply()
         }
+
+    /** Effective value: off when the user turned it off or Android's animation scale is 0 (reduced motion). */
+    val animations: Boolean
+        get() = animationsPref && systemMotionEnabled()
+
+    fun systemMotionEnabled(): Boolean {
+        return try {
+            Settings.Global.getFloat(appContext.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+        } catch (e: Exception) {
+            true
+        }
+    }
 
     var haptics: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS, true)

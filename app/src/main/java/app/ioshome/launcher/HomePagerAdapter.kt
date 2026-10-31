@@ -3,11 +3,18 @@ package app.ioshome.launcher
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import androidx.viewpager.widget.PagerAdapter
+
+const val SRC_HOME = 0
+const val SRC_DOCK = 1
 
 interface HomeCallbacks {
     fun onLaunch(entry: AppEntry, from: View)
-    fun onHomeMenu(entry: AppEntry, anchor: View, inDock: Boolean)
+    fun onOpenFolder(folderId: String)
+    fun onStartDrag(itemKey: String, view: View, source: Int)
+    fun onBadge(itemKey: String, inDock: Boolean)
+    fun onEnterEditMode()
     fun onLibraryMenu(entry: AppEntry, anchor: View)
     fun onOpenSettings()
 }
@@ -35,6 +42,8 @@ class HomePagerAdapter(
     private var topPad = 0
     private var bottomPad = 0
     private var animated = true
+    private var editMode = false
+    private val grids = HashMap<Int, HomeGridView>()
 
     fun update(
         items: List<String>,
@@ -45,7 +54,8 @@ class HomePagerAdapter(
         sidePad: Int,
         topPad: Int,
         bottomPad: Int,
-        animated: Boolean
+        animated: Boolean,
+        editMode: Boolean
     ) {
         this.items = ArrayList(items)
         this.cols = cols
@@ -56,9 +66,36 @@ class HomePagerAdapter(
         this.topPad = topPad
         this.bottomPad = bottomPad
         this.animated = animated
+        this.editMode = editMode
         val capacity = (cols * rows).coerceAtLeast(1)
         homePages = ((items.size + capacity - 1) / capacity).coerceAtLeast(1)
         notifyDataSetChanged()
+    }
+
+    /** The grid view currently instantiated for a home page, if any. */
+    fun gridAt(page: Int): HomeGridView? = grids[page]
+
+    fun setEditMode(on: Boolean, animate: Boolean) {
+        editMode = on
+        for (grid in grids.values) {
+            for (i in 0 until grid.childCount) {
+                (grid.getChildAt(i) as? AppIconView)?.setEditMode(on, animate)
+            }
+        }
+    }
+
+    /** Icons of a page pop in one after another (used when coming back to the home screen). */
+    fun playEntrance(page: Int) {
+        val grid = grids[page] ?: return
+        for (i in 0 until grid.childCount) {
+            val v = grid.getChildAt(i)
+            v.alpha = 0f
+            v.scaleX = 0.8f
+            v.scaleY = 0.8f
+            v.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                .setStartDelay(minOf(i * 12L, 240L)).setDuration(240L)
+                .setInterpolator(DecelerateInterpolator()).start()
+        }
     }
 
     override fun getCount(): Int = homePages + 1
@@ -75,6 +112,7 @@ class HomePagerAdapter(
     }
 
     override fun destroyItem(container: ViewGroup, position: Int, obj: Any) {
+        grids.remove(position)
         container.removeView(obj as View)
     }
 
@@ -84,23 +122,35 @@ class HomePagerAdapter(
         grid.rows = rows
         grid.setPadding(sidePad, topPad, sidePad, bottomPad)
         grid.setOnLongClickListener {
-            callbacks.onOpenSettings()
+            callbacks.onEnterEditMode()
             true
         }
         val capacity = (cols * rows).coerceAtLeast(1)
         val start = page * capacity
         val end = minOf(items.size, start + capacity)
         for (i in start until end) {
-            val entry = app.appsByKey[items[i]] ?: continue
+            val key = items[i]
             val v = AppIconView(context)
-            v.bind(entry, iconPx, showLabels, app.icons, animated)
-            v.setOnClickListener { callbacks.onLaunch(entry, v) }
+            if (key.startsWith(HomeModel.FOLDER_PREFIX)) {
+                val folder = app.model.folders[key] ?: continue
+                val entries = folder.apps.mapNotNull { app.appsByKey[it] }
+                v.bindFolder(key, folder.name, entries, iconPx, showLabels, app.icons, animated)
+                v.setOnClickListener { callbacks.onOpenFolder(key) }
+            } else {
+                val entry = app.appsByKey[key] ?: continue
+                v.bind(entry, iconPx, showLabels, app.icons, animated)
+                v.setOnClickListener { callbacks.onLaunch(entry, v) }
+            }
             v.setOnLongClickListener {
-                callbacks.onHomeMenu(entry, v, false)
+                callbacks.onStartDrag(key, v, SRC_HOME)
                 true
             }
+            v.onBadge = { callbacks.onBadge(key, false) }
+            v.setEditMode(editMode, animated)
+            if (animated && key == app.popKey) v.playPop()
             grid.addView(v)
         }
+        grids[page] = grid
         return grid
     }
 }

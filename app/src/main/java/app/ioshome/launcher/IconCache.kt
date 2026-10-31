@@ -1,12 +1,12 @@
 package app.ioshome.launcher
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Handler
 import android.os.Looper
@@ -24,13 +24,26 @@ class IconCache {
     }
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "icon-loader") }
     private val main = Handler(Looper.getMainLooper())
-    private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
-    }
 
     private fun keyOf(entry: AppEntry, size: Int): String = entry.key + "@" + size
 
     fun peek(entry: AppEntry, size: Int): Bitmap? = cache.get(keyOf(entry, size))
+
+    fun peekFolder(cacheKey: String, size: Int): Bitmap? = cache.get(cacheKey + "@" + size)
+
+    /** Renders a 3x3 preview of the folder's apps on a translucent rounded square, off the main thread. */
+    fun loadFolder(cacheKey: String, entries: List<AppEntry>, size: Int, callback: (Bitmap) -> Unit) {
+        worker.execute {
+            val k = cacheKey + "@" + size
+            val cached = cache.get(k)
+            val result: Bitmap = cached ?: run {
+                val rendered = renderFolder(entries, size)
+                cache.put(k, rendered)
+                rendered
+            }
+            main.post { callback(result) }
+        }
+    }
 
     /** Always calls [callback] on the main thread, with a placeholder if the real icon cannot be loaded. */
     fun load(entry: AppEntry, size: Int, callback: (Bitmap) -> Unit) {
@@ -83,21 +96,59 @@ class IconCache {
             drawable.setBounds(inset, inset, size - inset, size - inset)
             drawable.draw(canvas)
         }
-        applyRoundedMask(canvas, size)
-        return bmp
+        return roundCorners(bmp)
+    }
+
+    private fun renderFolder(entries: List<AppEntry>, size: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.argb(110, 235, 235, 245))
+        val pad = size * 0.10f
+        val cell = (size - 2 * pad) / 3f
+        val mini = (cell * 0.84f).toInt().coerceAtLeast(4)
+        var index = 0
+        for (entry in entries) {
+            if (index >= 9) break
+            val key = keyOf(entry, mini)
+            var icon: Bitmap? = cache.get(key)
+            if (icon == null) {
+                icon = try {
+                    render(entry, mini)
+                } catch (t: Throwable) {
+                    null
+                }
+                if (icon != null) cache.put(key, icon)
+            }
+            if (icon != null) {
+                val left = pad + (index % 3) * cell + (cell - mini) / 2f
+                val top = pad + (index / 3) * cell + (cell - mini) / 2f
+                canvas.drawBitmap(icon, left, top, null)
+            }
+            index++
+        }
+        return roundCorners(bmp)
     }
 
     private fun fallback(size: Int): Bitmap {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.rgb(200, 200, 206))
-        applyRoundedMask(canvas, size)
-        return bmp
+        return roundCorners(bmp)
     }
 
-    private fun applyRoundedMask(canvas: Canvas, size: Int) {
+    /**
+     * Returns a new bitmap showing [src] clipped to an anti-aliased rounded square (iOS corner radius,
+     * about 22% of the width). Drawing the source through a BitmapShader is what actually removes the
+     * corners; an alpha-mask xfermode on drawRoundRect only affects pixels inside the shape.
+     */
+    private fun roundCorners(src: Bitmap): Bitmap {
+        val size = src.width
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         val radius = size * 0.2237f
-        canvas.drawRoundRect(RectF(0f, 0f, size.toFloat(), size.toFloat()), radius, radius, maskPaint)
+        Canvas(out).drawRoundRect(RectF(0f, 0f, size.toFloat(), size.toFloat()), radius, radius, paint)
+        return out
     }
 
     private companion object {

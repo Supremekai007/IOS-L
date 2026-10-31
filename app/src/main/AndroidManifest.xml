@@ -4,6 +4,9 @@
     <!-- Only needed to show Android's own uninstall confirmation dialog. -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
+    <!-- Only takes effect if the user grants it in Android settings; used by the Control Center brightness and rotation controls. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
