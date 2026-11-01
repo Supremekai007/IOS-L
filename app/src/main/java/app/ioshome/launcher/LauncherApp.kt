@@ -1,6 +1,7 @@
 package app.ioshome.launcher
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.net.Uri
 import android.os.Handler
@@ -16,6 +17,8 @@ class LauncherApp : Application() {
 
     lateinit var settings: LauncherSettings
         private set
+    lateinit var packs: IconPackManager
+        private set
     lateinit var icons: IconCache
         private set
     lateinit var repo: AppRepository
@@ -28,6 +31,10 @@ class LauncherApp : Application() {
     var appsByKey: Map<String, AppEntry> = emptyMap()
         private set
     var loaded: Boolean = false
+        private set
+
+    /** Incremented whenever the app list or the icon appearance changes, so views know to rebuild. */
+    var appsVersion: Int = 0
         private set
 
     /** Set by the visible activity; called on the main thread whenever apps or layout change. */
@@ -46,27 +53,51 @@ class LauncherApp : Application() {
     override fun onCreate() {
         super.onCreate()
         settings = LauncherSettings(this)
-        icons = IconCache()
+        packs = IconPackManager(this)
+        icons = IconCache(this, settings, packs)
         store = LayoutStore(this)
         repo = AppRepository(this)
-        repo.start { reload() }
-        reload()
+        repo.start { changed -> reload(changed) }
+        reload(null)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) icons.trim(level)
     }
 
     /** Re-reads the installed apps in the background and reconciles the saved layout with them. */
-    fun reload() {
+    fun reload(changedPackages: Set<String>?) {
         io.execute {
+            packs.select(settings.iconPack)
+            icons.reconfigure()
             val list: List<AppEntry>? = try {
                 repo.loadApps()
             } catch (e: Exception) {
                 null
             }
             val stored = if (!modelReady) store.load() else null
-            main.post { applyLoaded(list, stored) }
+            main.post { applyLoaded(list, stored, changedPackages) }
         }
     }
 
-    private fun applyLoaded(list: List<AppEntry>?, stored: HomeModel?) {
+    fun reload() {
+        reload(null)
+    }
+
+    /** Re-applies the icon pack, shape and overrides after the user changed them. */
+    fun applyIconConfig() {
+        io.execute {
+            packs.select(settings.iconPack)
+            icons.reconfigure()
+            main.post {
+                appsVersion++
+                onDataChanged?.invoke()
+            }
+        }
+    }
+
+    private fun applyLoaded(list: List<AppEntry>?, stored: HomeModel?, changedPackages: Set<String>?) {
         val firstRun = !modelReady && stored == null
         if (!modelReady) {
             model = stored ?: HomeModel()
@@ -75,7 +106,10 @@ class LauncherApp : Application() {
         if (list != null) {
             apps = list
             appsByKey = list.associateBy { it.key }
-            icons.clear()
+            appsVersion++
+            if (changedPackages != null) {
+                for (pkg in changedPackages) icons.invalidatePackage(pkg)
+            }
             // An empty result is treated as a failed query: never prune the saved layout against it.
             if (list.isNotEmpty()) {
                 val keys = list.map { it.key }
@@ -114,6 +148,16 @@ class LauncherApp : Application() {
         if (apps.isEmpty()) return
         model.reset(apps.map { it.key }, defaultDock(apps), settings.dockSlots)
         save()
+        onDataChanged?.invoke()
+    }
+
+    /** Replaces the layout with an imported one, reconciled against the apps installed on this device. */
+    fun replaceModel(imported: HomeModel) {
+        model = imported
+        if (apps.isNotEmpty()) model.reconcile(apps.map { it.key }, settings.dockSlots)
+        modelReady = true
+        save()
+        appsVersion++
         onDataChanged?.invoke()
     }
 

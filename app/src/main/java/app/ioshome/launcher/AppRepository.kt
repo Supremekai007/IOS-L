@@ -16,38 +16,44 @@ class AppRepository(context: Context) {
     private val launcherApps: LauncherApps = appContext.getSystemService(LauncherApps::class.java)
     private val user: UserHandle = Process.myUserHandle()
     private val main = Handler(Looper.getMainLooper())
-    private var onChanged: (() -> Unit)? = null
-    private val notifyRunnable = Runnable { onChanged?.invoke() }
+    private var onChanged: ((Set<String>) -> Unit)? = null
+    private val pendingPackages = LinkedHashSet<String>()
+    private val notifyRunnable = Runnable {
+        val changed = HashSet(pendingPackages)
+        pendingPackages.clear()
+        onChanged?.invoke(changed)
+    }
 
     private val callback = object : LauncherApps.Callback() {
         override fun onPackageRemoved(packageName: String?, user: UserHandle?) {
-            schedule()
+            schedule(packageName)
         }
 
         override fun onPackageAdded(packageName: String?, user: UserHandle?) {
-            schedule()
+            schedule(packageName)
         }
 
         override fun onPackageChanged(packageName: String?, user: UserHandle?) {
-            schedule()
+            schedule(packageName)
         }
 
         override fun onPackagesAvailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) {
-            schedule()
+            if (packageNames != null) for (name in packageNames) schedule(name)
         }
 
         override fun onPackagesUnavailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) {
-            schedule()
+            if (packageNames != null) for (name in packageNames) schedule(name)
         }
     }
 
-    fun start(listener: () -> Unit) {
+    fun start(listener: (Set<String>) -> Unit) {
         onChanged = listener
         launcherApps.registerCallback(callback, main)
     }
 
     /** Debounced so an app update (remove + add) produces one refresh after things settle. */
-    private fun schedule() {
+    private fun schedule(packageName: String?) {
+        if (packageName != null) pendingPackages.add(packageName)
         main.removeCallbacks(notifyRunnable)
         main.postDelayed(notifyRunnable, 800L)
     }

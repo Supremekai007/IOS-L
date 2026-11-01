@@ -2,6 +2,7 @@ package app.ioshome.launcher
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -286,5 +287,49 @@ class HomeModelTest {
         assertEquals("app5", m.recents.first())
         assertTrue(m.reconcile(keys.filter { it != "app5" }, 4))
         assertFalse(m.recents.contains("app5"))
+    }
+
+    // ---------------------------------------------------------------- folder helpers used by the live drag
+
+    @Test
+    fun moveInFolderPlacesAppAtFinalIndex() {
+        val m = model("a", "b", "c")
+        m.mergeIntoFolder("b", "a")
+        m.mergeIntoFolder("c", "folder:1")
+        assertTrue(m.moveInFolder("folder:1", "c", 0))
+        assertEquals(listOf("c", "a", "b"), m.folders["folder:1"]!!.apps)
+        assertTrue(m.moveInFolder("folder:1", "c", 99))
+        assertEquals(listOf("a", "b", "c"), m.folders["folder:1"]!!.apps)
+        assertFalse(m.moveInFolder("folder:1", "zzz", 0))
+        assertFalse(m.moveInFolder("folder:9", "a", 0))
+    }
+
+    @Test
+    fun peekNextFolderIdMatchesTheFolderThatGetsCreated() {
+        val m = model("a", "b", "c", "d")
+        val first = m.peekNextFolderId()
+        assertTrue(m.mergeIntoFolder("b", "a"))
+        assertTrue(m.folders.containsKey(first))
+        assertEquals("folder:2", m.peekNextFolderId())
+    }
+
+    @Test
+    fun folderOfFindsTheHoldingFolder() {
+        val m = model("a", "b", "c")
+        m.mergeIntoFolder("b", "a")
+        assertEquals("folder:1", m.folderOf("a"))
+        assertEquals("folder:1", m.folderOf("b"))
+        assertNull(m.folderOf("c"))
+    }
+
+    @Test
+    fun appCanMoveBetweenFoldersWithoutLoss() {
+        val m = model("a", "b", "c", "d")
+        m.mergeIntoFolder("b", "a")
+        m.mergeIntoFolder("d", "c")
+        assertTrue(m.mergeIntoFolder("b", "folder:2"))
+        assertEquals(listOf("a"), m.folders["folder:1"]!!.apps)
+        assertEquals(listOf("c", "d", "b"), m.folders["folder:2"]!!.apps)
+        assertEquals(listOf("folder:1", "folder:2"), m.home)
     }
 }

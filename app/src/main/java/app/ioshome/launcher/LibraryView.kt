@@ -46,6 +46,12 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
     private var rows: List<Row> = emptyList()
     private val iconPx = context.dp(44)
 
+    /** Size icons are cached at (set by the activity so the library reuses the home screen's bitmaps). */
+    var canonicalPx: Int = 0
+
+    private var textColor = Color.WHITE
+    private var dimColor = Color.argb(200, 255, 255, 255)
+
     init {
         orientation = VERTICAL
         setBackgroundColor(Color.argb(115, 0, 0, 0))
@@ -113,6 +119,7 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
         listView.dividerHeight = 0
         listView.selector = ColorDrawable(Color.argb(40, 255, 255, 255))
         listView.adapter = rowAdapter
+        listView.isFastScrollEnabled = true
         listView.setOnItemClickListener { _, v, position, _ ->
             val entry = rows.getOrNull(position)?.app
             if (entry != null) onLaunch?.invoke(entry, v)
@@ -156,6 +163,33 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
         recentApps = recents
         loaded = isLoaded
         refilter()
+    }
+
+    /** Light or dark palette for the page (scrim, search field and text). */
+    fun applyAppearance(dark: Boolean) {
+        val barBg = GradientDrawable()
+        barBg.cornerRadius = context.dpf(12f)
+        if (dark) {
+            textColor = Color.WHITE
+            dimColor = Color.argb(200, 255, 255, 255)
+            setBackgroundColor(Color.argb(115, 0, 0, 0))
+            barBg.setColor(Color.argb(60, 255, 255, 255))
+            search.setTextColor(Color.WHITE)
+            search.setHintTextColor(Color.argb(170, 255, 255, 255))
+            clearButton.setTextColor(Color.argb(200, 255, 255, 255))
+            emptyView.setTextColor(Color.argb(200, 255, 255, 255))
+        } else {
+            textColor = Color.rgb(28, 28, 34)
+            dimColor = Color.argb(200, 28, 28, 34)
+            setBackgroundColor(Color.argb(150, 255, 255, 255))
+            barBg.setColor(Color.argb(70, 0, 0, 0))
+            search.setTextColor(Color.rgb(28, 28, 34))
+            search.setHintTextColor(Color.argb(150, 28, 28, 34))
+            clearButton.setTextColor(Color.argb(200, 28, 28, 34))
+            emptyView.setTextColor(Color.argb(200, 28, 28, 34))
+        }
+        (search.parent as? View)?.background = barBg
+        rowAdapter.notifyDataSetChanged()
     }
 
     fun hasQuery(): Boolean = search.text.isNotEmpty()
@@ -234,11 +268,12 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
             val row = rows[position]
             if (row.header != null) {
                 val tv = (convertView as? TextView) ?: TextView(context).apply {
-                    setTextColor(Color.argb(200, 255, 255, 255))
+                    setTextColor(dimColor)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                     typeface = Typeface.DEFAULT_BOLD
                     setPadding(context.dp(8), context.dp(14), context.dp(8), context.dp(4))
                 }
+                tv.setTextColor(dimColor)
                 tv.text = row.header
                 return tv
             }
@@ -275,12 +310,14 @@ class LibraryView(context: Context, private val app: LauncherApp) : LinearLayout
 
             holder.boundKey = entry.key
             holder.label.text = entry.label
-            val cached = app.icons.peek(entry, iconPx)
+            holder.label.setTextColor(textColor)
+            val size = if (canonicalPx > 0) canonicalPx else iconPx
+            val cached = app.icons.peek(entry, size)
             if (cached != null) {
                 holder.icon.setImageBitmap(cached)
             } else {
-                holder.icon.setImageDrawable(null)
-                app.icons.load(entry, iconPx) { bmp ->
+                holder.icon.setImageBitmap(app.icons.placeholder(size))
+                app.icons.request(entry, size, 3) { bmp ->
                     if (holder.boundKey == entry.key) holder.icon.setImageBitmap(bmp)
                 }
             }

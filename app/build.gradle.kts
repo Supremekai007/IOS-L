@@ -11,8 +11,8 @@ android {
         applicationId = "app.ioshome.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     buildTypes {
@@ -38,5 +38,6 @@ android {
 
 dependencies {
     implementation("androidx.viewpager:viewpager:1.0.0")
+    implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
     testImplementation("junit:junit:4.13.2")
 }

@@ -1,6 +1,8 @@
 package app.ioshome.launcher
 
 import android.content.Context
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.ViewGroup
 
 /** One home-screen page: lays children out row-major in a fixed columns x rows grid of equal cells. */
@@ -8,6 +10,24 @@ class HomeGridView(context: Context) : ViewGroup(context) {
 
     var columns: Int = 4
     var rows: Int = 6
+
+    /** Which home page this view shows, and a fingerprint of what it was built from (for view reuse). */
+    var pageIndex: Int = -1
+    var signature: String = ""
+
+    /** Called for a double tap on empty space. */
+    var doubleTapListener: (() -> Unit)? = null
+
+    private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            doubleTapListener?.invoke()
+            return true
+        }
+    })
+
+    fun cellWidth(): Float = (width - paddingLeft - paddingRight) / columns.coerceAtLeast(1).toFloat()
+
+    fun cellHeight(): Float = (height - paddingTop - paddingBottom) / rows.coerceAtLeast(1).toFloat()
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -33,5 +53,10 @@ class HomeGridView(context: Context) : ViewGroup(context) {
             val y = paddingTop + row * cellH
             getChildAt(i).layout(x, y, x + cellW, y + cellH)
         }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        detector.onTouchEvent(event)
+        return super.onTouchEvent(event)
     }
 }

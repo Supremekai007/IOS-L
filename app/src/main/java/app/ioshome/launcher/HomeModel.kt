@@ -227,6 +227,26 @@ class HomeModel {
         return true
     }
 
+    /** Places an app at [index] (its final position) inside an existing folder. */
+    fun moveInFolder(folderId: String, key: String, index: Int): Boolean {
+        val folder = folders[folderId] ?: return false
+        if (key !in folder.apps) return false
+        folder.apps.remove(key)
+        folder.apps.add(index.coerceIn(0, folder.apps.size), key)
+        return true
+    }
+
+    /** The id the next created folder will get (lets the UI prepare an animation before the change). */
+    fun peekNextFolderId(): String = newFolderId()
+
+    /** The folder holding [key], or null. */
+    fun folderOf(key: String): String? {
+        for ((id, folder) in folders) {
+            if (folder.apps.contains(key)) return id
+        }
+        return null
+    }
+
     /** Removes the folder and puts its apps back on the home screen where the folder was. */
     fun dissolveFolder(id: String): Boolean {
         val folder = folders.remove(id) ?: return false

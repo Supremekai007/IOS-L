@@ -20,7 +20,7 @@ import java.util.Random
 
 /**
  * An app or folder icon with its label, an iOS-style press-scale effect, and an edit mode that makes it
- * jiggle and shows a remove badge.
+ * jiggle and shows a remove badge. Shows a placeholder at once and swaps in the real icon when ready.
  */
 class AppIconView(context: Context) : LinearLayout(context) {
 
@@ -28,6 +28,9 @@ class AppIconView(context: Context) : LinearLayout(context) {
     private val labelView = TextView(context)
     private var boundKey: String? = null
     private var animated = true
+
+    /** The model key this view represents (app key or folder id). */
+    var itemKey: String? = null
 
     private var editing = false
     private var jiggle: ObjectAnimator? = null
@@ -46,7 +49,6 @@ class AppIconView(context: Context) : LinearLayout(context) {
         iconView.scaleType = ImageView.ScaleType.FIT_CENTER
 
         labelView.setTextColor(Color.WHITE)
-        labelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
         labelView.maxLines = 1
         labelView.ellipsize = TextUtils.TruncateAt.END
         labelView.gravity = Gravity.CENTER
@@ -64,31 +66,58 @@ class AppIconView(context: Context) : LinearLayout(context) {
         badgeMark.color = Color.WHITE
     }
 
-    private fun sizeIcon(iconPx: Int) {
+    private fun prepare(displayPx: Int, showLabel: Boolean, labelSp: Float, text: String) {
+        labelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSp)
+        labelView.text = text
+        labelView.visibility = if (showLabel) View.VISIBLE else View.GONE
         val params = iconView.layoutParams as LinearLayout.LayoutParams
-        params.width = iconPx
-        params.height = iconPx
+        params.width = displayPx
+        params.height = displayPx
         iconView.layoutParams = params
-    }
-
-    fun bind(entry: AppEntry, iconPx: Int, showLabel: Boolean, icons: IconCache, animatePress: Boolean) {
-        animated = animatePress
-        boundKey = entry.key
-        contentDescription = entry.label
+        Springs.cancelAll(this)
         scaleX = 1f
         scaleY = 1f
+        translationX = 0f
+        translationY = 0f
+        iconView.animate().cancel()
+        iconView.alpha = 1f
+    }
 
-        labelView.text = entry.label
-        labelView.visibility = if (showLabel) View.VISIBLE else View.GONE
-        sizeIcon(iconPx)
+    private fun swapIn(bmp: android.graphics.Bitmap, fade: Boolean) {
+        iconView.setImageBitmap(bmp)
+        if (fade) {
+            iconView.alpha = 0.35f
+            iconView.animate().alpha(1f).setStartDelay(0L).setDuration(140L)
+                .setInterpolator(DecelerateInterpolator()).start()
+        }
+    }
 
-        val cached = icons.peek(entry, iconPx)
+    /**
+     * [canonicalPx] is the size the icon bitmap is cached at; [displayPx] is the size the view shows it at
+     * (equal or a little smaller, so scaling is always a mild reduction).
+     */
+    fun bind(
+        entry: AppEntry,
+        canonicalPx: Int,
+        displayPx: Int,
+        showLabel: Boolean,
+        labelSp: Float,
+        icons: IconCache,
+        animatePress: Boolean
+    ) {
+        animated = animatePress
+        boundKey = entry.key
+        itemKey = entry.key
+        contentDescription = entry.label
+        prepare(displayPx, showLabel, labelSp, entry.label)
+
+        val cached = icons.peek(entry, canonicalPx)
         if (cached != null) {
             iconView.setImageBitmap(cached)
         } else {
-            iconView.setImageDrawable(null)
-            icons.load(entry, iconPx) { bmp ->
-                if (boundKey == entry.key) iconView.setImageBitmap(bmp)
+            iconView.setImageBitmap(icons.placeholder(canonicalPx))
+            icons.request(entry, canonicalPx, 1) { bmp ->
+                if (boundKey == entry.key) swapIn(bmp, animatePress)
             }
         }
     }
@@ -97,47 +126,51 @@ class AppIconView(context: Context) : LinearLayout(context) {
         folderKey: String,
         name: String,
         entries: List<AppEntry>,
-        iconPx: Int,
+        canonicalPx: Int,
+        displayPx: Int,
         showLabel: Boolean,
+        labelSp: Float,
         icons: IconCache,
         animatePress: Boolean
     ) {
         animated = animatePress
         val cacheKey = folderKey + "|" + entries.joinToString(",") { it.key }
         boundKey = cacheKey
+        itemKey = folderKey
         contentDescription = "Folder " + name
-        scaleX = 1f
-        scaleY = 1f
+        prepare(displayPx, showLabel, labelSp, name)
 
-        labelView.text = name
-        labelView.visibility = if (showLabel) View.VISIBLE else View.GONE
-        sizeIcon(iconPx)
-
-        val cached = icons.peekFolder(cacheKey, iconPx)
+        val cached = icons.peekFolder(cacheKey, canonicalPx)
         if (cached != null) {
             iconView.setImageBitmap(cached)
         } else {
-            iconView.setImageDrawable(null)
-            icons.loadFolder(cacheKey, entries, iconPx) { bmp ->
-                if (boundKey == cacheKey) iconView.setImageBitmap(bmp)
+            iconView.setImageBitmap(icons.placeholder(canonicalPx))
+            icons.loadFolder(cacheKey, entries, canonicalPx) { bmp ->
+                if (boundKey == cacheKey) swapIn(bmp, animatePress)
             }
         }
     }
 
-    /** Highlights this icon as the target of a drop that would create or fill a folder. */
-    fun setHighlighted(on: Boolean) {
-        val target = if (on) 1.18f else 1f
-        animate().scaleX(target).scaleY(target).setStartDelay(0L).setDuration(120L)
-            .setInterpolator(DecelerateInterpolator()).start()
+    /** Bounds of the icon image inside this view (used to draw the lifted drag shadow). */
+    fun iconBounds(): RectF {
+        return RectF(iconView.left.toFloat(), iconView.top.toFloat(), iconView.right.toFloat(), iconView.bottom.toFloat())
     }
 
-    /** Short settle animation for an icon that was just dropped into place. */
+    /** Grows the icon gradually while another icon lingers over it (0 = normal, 1 = folder-ready). */
+    fun setDwellProgress(fraction: Float) {
+        val scale = 1f + 0.18f * fraction.coerceIn(0f, 1f)
+        scaleX = scale
+        scaleY = scale
+    }
+
+    /** Springs the icon back to normal size after a dwell was abandoned. */
+    fun releaseDwell() {
+        Springs.scaleTo(this, 1f)
+    }
+
+    /** Short spring settle for an icon that was just dropped into place. */
     fun playPop() {
-        scaleX = 1.3f
-        scaleY = 1.3f
-        alpha = 0.5f
-        animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(0L).setDuration(260L)
-            .setInterpolator(DecelerateInterpolator()).start()
+        Springs.settle(this, 1.28f)
     }
 
     fun setEditMode(on: Boolean, animate: Boolean) {
